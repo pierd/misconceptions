@@ -66,6 +66,40 @@ h1 {
   display: block;
 }
 
+/* Date Navigation */
+.date-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.nav-arrow {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-arrow:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 /* Misconception Card */
 .misconception-card {
   background: var(--color-surface);
@@ -178,6 +212,16 @@ h1 {
 
   h1 {
     font-size: 2rem;
+  }
+
+  .date-nav {
+    gap: 0.5rem;
+  }
+
+  .nav-arrow {
+    width: 2rem;
+    height: 2rem;
+    font-size: 1rem;
   }
 
   .misconception-card {

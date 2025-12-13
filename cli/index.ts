@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { writeFile, readFile, mkdir, access } from "fs/promises";
 import { join } from "path";
 import { fal } from "@fal-ai/client";
+import { getUpcomingIndices } from "../shared/daily-selection";
 
 const program = new Command();
 
@@ -378,6 +379,7 @@ program
   )
   .option("-i, --id <id>", "Generate image for a specific misconception ID")
   .option("--missing", "Only generate images for misconceptions without images")
+  .option("-d, --days <n>", "Generate images for misconceptions shown in the next N days", parseInt)
   .option("-o, --output <dir>", "Output directory for images", "public/images")
   .option("--dry-run", "Show what would be generated without actually generating")
   .action(
@@ -386,6 +388,7 @@ program
       model: string;
       id?: string;
       missing?: boolean;
+      days?: number;
       output: string;
       dryRun?: boolean;
     }) => {
@@ -425,6 +428,26 @@ program
           process.exit(1);
         }
         toGenerate = [found];
+      } else if (options.days) {
+        // Generate for misconceptions shown in the next N days
+        console.log(`📅 Finding misconceptions for the next ${options.days} days...`);
+        const upcoming = getUpcomingIndices(new Date(), options.days, misconceptions.length);
+        const seenIndices = new Set<number>();
+
+        for (const { date, index } of upcoming) {
+          if (!seenIndices.has(index)) {
+            seenIndices.add(index);
+            const m = misconceptions[index];
+            const imagePath = join(outputDir, `${m.id}.png`);
+            const hasImage = await fileExists(imagePath);
+            const dateStr = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+            console.log(`   ${dateStr}: ${m.text.slice(0, 50)}...${hasImage ? " (has image)" : ""}`);
+            if (!hasImage) {
+              toGenerate.push(m);
+            }
+          }
+        }
+        console.log(`   Found ${toGenerate.length} misconceptions needing images\n`);
       } else if (options.missing) {
         // Generate only missing images
         console.log("🔍 Checking for missing images...");

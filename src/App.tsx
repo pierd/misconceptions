@@ -2,6 +2,7 @@ import { useState } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import misconceptionsData from "../misconceptions.json";
+import { getDailyIndex } from "../shared/daily-selection";
 
 interface Misconception {
   id: string;
@@ -17,23 +18,6 @@ interface Misconception {
  */
 function getImageUrl(id: string): string {
   return `/images/${id}.png`;
-}
-
-/**
- * Get a deterministic index based on the current date
- * Same date = same misconception
- */
-function getDailyIndex(date: Date, total: number): number {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const day = date.getDate();
-
-  // Simple hash based on date components
-  const seed = year * 10000 + month * 100 + day;
-
-  // Use a simple LCG-style calculation for distribution
-  const hash = ((seed * 1103515245 + 12345) >>> 0) % total;
-  return hash;
 }
 
 function formatDate(date: Date): string {

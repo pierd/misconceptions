@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { writeFile, readFile, mkdir, access } from "fs/promises";
 import { join } from "path";
 import { fal } from "@fal-ai/client";
-import { getUpcomingIndices } from "../shared/daily-selection";
+import { getDateRangeIndices } from "../shared/daily-selection";
 
 const program = new Command();
 
@@ -380,6 +380,7 @@ program
   .option("-i, --id <id>", "Generate image for a specific misconception ID")
   .option("--missing", "Only generate images for misconceptions without images")
   .option("-d, --days <n>", "Generate images for misconceptions shown in the next N days", parseInt)
+  .option("-p, --past <n>", "Generate images for misconceptions shown in the past N days", parseInt)
   .option("-o, --output <dir>", "Output directory for images", "public/images")
   .option("--dry-run", "Show what would be generated without actually generating")
   .action(
@@ -389,6 +390,7 @@ program
       id?: string;
       missing?: boolean;
       days?: number;
+      past?: number;
       output: string;
       dryRun?: boolean;
     }) => {
@@ -428,13 +430,16 @@ program
           process.exit(1);
         }
         toGenerate = [found];
-      } else if (options.days) {
-        // Generate for misconceptions shown in the next N days
-        console.log(`📅 Finding misconceptions for the next ${options.days} days...`);
-        const upcoming = getUpcomingIndices(new Date(), options.days, misconceptions.length);
+      } else if (options.days || options.past) {
+        // Generate for misconceptions shown in the next/past N days
+        const daysValue = options.days ?? -(options.past!);
+        const direction = daysValue >= 0 ? "next" : "past";
+        const count = Math.abs(daysValue);
+        console.log(`📅 Finding misconceptions for the ${direction} ${count} days...`);
+        const dateRange = getDateRangeIndices(new Date(), daysValue, misconceptions.length);
         const seenIndices = new Set<number>();
 
-        for (const { date, index } of upcoming) {
+        for (const { date, index } of dateRange) {
           if (!seenIndices.has(index)) {
             seenIndices.add(index);
             const m = misconceptions[index];

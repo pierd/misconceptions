@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import misconceptionsData from "../misconceptions.json";
@@ -9,6 +10,13 @@ interface Misconception {
   subsection?: string;
   category: string;
   source: string;
+}
+
+/**
+ * Get the image URL for a misconception
+ */
+function getImageUrl(id: string): string {
+  return `/images/${id}.png`;
 }
 
 /**
@@ -70,6 +78,11 @@ function App() {
   const dailyIndex = getDailyIndex(today, misconceptions.length);
   const misconception = misconceptions[dailyIndex];
 
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  const imageUrl = getImageUrl(misconception.id);
+
   return (
     <main className="container">
       <header className="header">
@@ -78,6 +91,17 @@ function App() {
       </header>
 
       <article className="misconception-card">
+        {!imageError && (
+          <div className={`misconception-image ${imageLoaded ? "loaded" : ""}`}>
+            <img
+              src={imageUrl}
+              alt=""
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageError(true)}
+            />
+          </div>
+        )}
+
         <blockquote className="misconception-text">
           <MathText text={misconception.text} />
         </blockquote>

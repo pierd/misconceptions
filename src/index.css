@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap');
+
 *,
 *::before,
 *::after {
@@ -9,9 +11,12 @@
 :root {
   --color-bg: #0d1117;
   --color-surface: #161b22;
+  --color-surface-elevated: #1c2128;
+  --color-border: #30363d;
   --color-text: #e6edf3;
   --color-text-muted: #8b949e;
   --color-accent: #f78166;
+  --color-accent-muted: rgba(247, 129, 102, 0.15);
   --font-display: "Playfair Display", Georgia, serif;
   --font-body: "Source Sans 3", system-ui, sans-serif;
 }
@@ -26,12 +31,24 @@ body {
   color: var(--color-text);
   line-height: 1.6;
   min-height: 100vh;
+  background-image: 
+    radial-gradient(ellipse at 20% 0%, rgba(247, 129, 102, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(247, 129, 102, 0.05) 0%, transparent 50%);
 }
 
 .container {
   max-width: 720px;
   margin: 0 auto;
   padding: 4rem 1.5rem;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.header {
+  margin-bottom: 3rem;
+  text-align: center;
 }
 
 h1 {
@@ -39,12 +56,126 @@ h1 {
   font-size: 2.5rem;
   font-weight: 700;
   color: var(--color-accent);
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.5rem;
   letter-spacing: -0.02em;
 }
 
-p {
+.date {
   color: var(--color-text-muted);
-  font-size: 1.125rem;
+  font-size: 1rem;
+  display: block;
+}
+
+/* Misconception Card */
+.misconception-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 2.5rem;
+  margin-bottom: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.misconception-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--color-accent), transparent);
+}
+
+.misconception-text {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--color-text);
+  margin-bottom: 2rem;
+  position: relative;
+  padding-left: 1.5rem;
+  border-left: 3px solid var(--color-accent);
+}
+
+/* Meta footer */
+.misconception-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.category-badge {
+  background: var(--color-accent-muted);
+  color: var(--color-accent);
+  padding: 0.35rem 0.85rem;
+  border-radius: 100px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.section {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.source-link {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.2s ease;
+}
+
+.source-link:hover {
+  color: var(--color-accent);
+}
+
+/* Footnote */
+.footnote {
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  text-align: center;
+  margin-top: auto;
+  padding-top: 2rem;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  html {
+    font-size: 16px;
+  }
+
+  .container {
+    padding: 2rem 1rem;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  .misconception-card {
+    padding: 1.5rem;
+  }
+
+  .misconception-text {
+    font-size: 1.25rem;
+    padding-left: 1rem;
+  }
+
+  .misconception-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .source-link {
+    margin-left: 0;
+    margin-top: 0.5rem;
+  }
 }
 

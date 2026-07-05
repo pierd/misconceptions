@@ -1,6 +1,7 @@
 import {createHash} from "node:crypto";
 import {initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {defineSecret} from "firebase-functions/params";
 import {setGlobalOptions} from "firebase-functions/v2";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {onSchedule} from "firebase-functions/v2/scheduler";
@@ -9,7 +10,10 @@ import * as logger from "firebase-functions/logger";
 initializeApp();
 
 const db = getFirestore();
+const forwardEmailApiKey = defineSecret("FORWARD_EMAIL_API_KEY");
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FORWARD_EMAIL_API_URL = "https://api.forwardemail.net/v1/emails";
+const NEWSLETTER_FROM_EMAIL = "misconceptions@lessismore.studio";
 const WARSAW_TIME_ZONE = "Europe/Warsaw";
 const CORS_ORIGINS = [
   "https://misconceptions.lessismore.studio",
@@ -41,6 +45,67 @@ function emailDocumentId(email: string): string {
   return createHash("sha256").update(email).digest("hex");
 }
 
+function getStringField(
+  data: FirebaseFirestore.DocumentData,
+  field: string,
+): string {
+  const value = data[field];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function buildMisconceptionEmail(misconception: FirebaseFirestore.DocumentData): {
+  subject: string;
+  text: string;
+  html: string;
+} {
+  const text = getStringField(misconception, "text");
+  const category = getStringField(misconception, "category");
+  const section = getStringField(misconception, "section");
+  const subsection = getStringField(misconception, "subsection");
+  const source = getStringField(misconception, "source");
+  const location = [category, section, subsection].filter(Boolean).join(" / ");
+  const subject = category ?
+    `Today's misconception: ${category}` :
+    "Today's misconception";
+  const metadata = location ? `\n\nCategory: ${location}` : "";
+  const sourceLine = source ? `\nSource: ${source}` : "";
+  const textBody = `${text}${metadata}${sourceLine}`;
+  const htmlBody = [
+    "<p>",
+    escapeHtml(text).replace(/\n/g, "<br>"),
+    "</p>",
+    location ? `<p><strong>Category:</strong> ${escapeHtml(location)}</p>` : "",
+    source ?
+      `<p><a href="${escapeHtml(source)}">Read the source</a></p>` :
+      "",
+  ].join("");
+
+  return {
+    subject,
+    text: textBody,
+    html: htmlBody,
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+    case "&":
+      return "&amp;";
+    case "<":
+      return "&lt;";
+    case ">":
+      return "&gt;";
+    case "\"":
+      return "&quot;";
+    case "'":
+      return "&#39;";
+    default:
+      return character;
+    }
+  });
+}
+
 function getWarsawDateKey(date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: WARSAW_TIME_ZONE,
@@ -57,9 +122,30 @@ async function sendMisconceptionEmail(
   email: string,
   misconception: FirebaseFirestore.DocumentData,
 ): Promise<void> {
-  void email;
-  void misconception;
-  // TODO: Call the Forward Email API directly with the recipient and content.
+  const apiKey = forwardEmailApiKey.value();
+  const message = buildMisconceptionEmail(misconception);
+  const body = new URLSearchParams({
+    from: NEWSLETTER_FROM_EMAIL,
+    to: email,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  });
+  const response = await fetch(FORWARD_EMAIL_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const responseBody = await response.text();
+    throw new Error(
+      `Forward Email API returned ${response.status}: ${responseBody}`,
+    );
+  }
 }
 
 export const subscribeToNewsletter = onCall({cors: CORS_ORIGINS}, async (request) => {
@@ -99,6 +185,7 @@ export const sendDailyMisconception = onSchedule(
   {
     schedule: "every day 08:00",
     timeZone: WARSAW_TIME_ZONE,
+    secrets: [forwardEmailApiKey],
   },
   async () => {
     const dateKey = getWarsawDateKey();
@@ -160,7 +247,7 @@ export const sendDailyMisconception = onSchedule(
         .where("status", "==", "active")
         .get();
       const misconception = misconceptionSnapshot.data() ?? {};
-      let preparedCount = 0;
+      let sentCount = 0;
       let failedCount = 0;
       let skippedCount = 0;
 
@@ -173,7 +260,7 @@ export const sendDailyMisconception = onSchedule(
 
         try {
           await sendMisconceptionEmail(email, misconception);
-          preparedCount++;
+          sentCount++;
         } catch (error) {
           failedCount++;
           logger.error("Failed to send daily misconception email.", {
@@ -185,11 +272,11 @@ export const sendDailyMisconception = onSchedule(
 
       await sendRef.set(
         {
-          status: failedCount > 0 ? "partial" : "prepared",
+          status: failedCount > 0 ? "partial" : "sent",
           misconceptionId,
           recipientCount: subscribersSnapshot.size,
-          preparedCount,
-          sentCount: 0,
+          preparedCount: sentCount,
+          sentCount,
           failedCount,
           skippedCount,
           completedAt: FieldValue.serverTimestamp(),

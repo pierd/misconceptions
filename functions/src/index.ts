@@ -11,6 +11,13 @@ initializeApp();
 const db = getFirestore();
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WARSAW_TIME_ZONE = "Europe/Warsaw";
+const CORS_ORIGINS = [
+  "https://misconceptions.lessismore.studio",
+  "https://misconceptions-lims.web.app",
+  "https://misconceptions-lims.firebaseapp.com",
+  /^http:\/\/localhost:\d+$/,
+  /^http:\/\/127\.0\.0\.1:\d+$/,
+];
 
 setGlobalOptions({
   maxInstances: 10,
@@ -55,7 +62,7 @@ async function sendMisconceptionEmail(
   // TODO: Call the Forward Email API directly with the recipient and content.
 }
 
-export const subscribeToNewsletter = onCall(async (request) => {
+export const subscribeToNewsletter = onCall({cors: CORS_ORIGINS}, async (request) => {
   const email = normalizeEmail(request.data?.email);
   const subscriberRef = db.collection("newsletterSubscribers").doc(emailDocumentId(email));
   const now = FieldValue.serverTimestamp();

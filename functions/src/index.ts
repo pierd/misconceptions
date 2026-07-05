@@ -16,9 +16,9 @@ const FORWARD_EMAIL_API_URL = "https://api.forwardemail.net/v1/emails";
 const NEWSLETTER_FROM_EMAIL = "misconceptions@lessismore.studio";
 const WARSAW_TIME_ZONE = "Europe/Warsaw";
 const CORS_ORIGINS = [
-  "https://misconceptions.lessismore.studio",
-  "https://misconceptions-lims.web.app",
-  "https://misconceptions-lims.firebaseapp.com",
+  /^https:\/\/misconceptions\.lessismore\.studio$/,
+  /^https:\/\/misconceptions-lims\.web\.app$/,
+  /^https:\/\/misconceptions-lims\.firebaseapp\.com$/,
   /^http:\/\/localhost:\d+$/,
   /^http:\/\/127\.0\.0\.1:\d+$/,
 ];
@@ -148,38 +148,46 @@ async function sendMisconceptionEmail(
   }
 }
 
-export const subscribeToNewsletter = onCall({cors: CORS_ORIGINS}, async (request) => {
-  const email = normalizeEmail(request.data?.email);
-  const subscriberRef = db.collection("newsletterSubscribers").doc(emailDocumentId(email));
-  const now = FieldValue.serverTimestamp();
+export const subscribeToNewsletter = onCall(
+  {
+    cors: CORS_ORIGINS,
+    invoker: "public",
+  },
+  async (request) => {
+    const email = normalizeEmail(request.data?.email);
+    const subscriberRef = db
+      .collection("newsletterSubscribers")
+      .doc(emailDocumentId(email));
+    const now = FieldValue.serverTimestamp();
 
-  const status = await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(subscriberRef);
+    const status = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(subscriberRef);
 
-    if (snapshot.exists && snapshot.get("status") === "active") {
-      transaction.update(subscriberRef, {
-        updatedAt: now,
-      });
-      return "already-subscribed";
-    }
+      if (snapshot.exists && snapshot.get("status") === "active") {
+        transaction.update(subscriberRef, {
+          updatedAt: now,
+        });
+        return "already-subscribed";
+      }
 
-    transaction.set(
-      subscriberRef,
-      {
-        email,
-        status: "active",
-        source: "frontend",
-        createdAt: snapshot.exists ? snapshot.get("createdAt") ?? now : now,
-        updatedAt: now,
-      },
-      {merge: true},
-    );
+      transaction.set(
+        subscriberRef,
+        {
+          email,
+          status: "active",
+          source: "frontend",
+          createdAt: snapshot.exists ? snapshot.get("createdAt") ?? now : now,
+          updatedAt: now,
+        },
+        {merge: true},
+      );
 
-    return "subscribed";
-  });
+      return "subscribed";
+    });
 
-  return {status};
-});
+    return {status};
+  },
+);
 
 export const sendDailyMisconception = onSchedule(
   {

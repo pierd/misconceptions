@@ -2,8 +2,40 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isPublishedDaily() {
+      return resource.data.status in ["published", "sent"];
+    }
+
+    match /misconceptions/{misconceptionId} {
+      allow read: if resource.data.active == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /dailyMisconceptions/{date} {
+      allow read: if isPublishedDaily() || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow get: if (signedIn() && request.auth.uid == uid) || isAdmin();
+      allow list, write: if isAdmin();
+    }
+
+    match /newsletterSubscribers/{subscriberId} {
       allow read, write: if false;
+    }
+
+    match /newsletterSends/{sendId} {
+      allow read, write: if isAdmin();
     }
   }
 }

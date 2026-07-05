@@ -5,11 +5,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "lint:functions": "npm --prefix functions run lint",
     "preview": "vite preview",
     "cli": "tsx cli/index.ts"
   },
   "dependencies": {
     "@fal-ai/client": "^1.7.2",
+    "firebase": "^12.15.0",
+    "firebase-admin": "^14.1.0",
     "katex": "^0.16.27",
     "posthog-js": "^1.316.1",
     "react": "^18.3.1",
@@ -17,6 +21,7 @@
     "react-katex": "^3.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/katex": "^0.16.7",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.14",
@@ -24,9 +29,14 @@
     "@types/react-katex": "^3.0.4",
     "@vitejs/plugin-react": "^4.3.4",
     "commander": "^12.1.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
     "firebase-tools": "^15.22.4",
+    "globals": "^17.7.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.62.1",
     "vite": "^6.0.3",
     "vite-plugin-pwa": "^0.21.1"
   },

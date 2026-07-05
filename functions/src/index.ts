@@ -1,32 +1,205 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
-import {setGlobalOptions} from "firebase-functions";
-import {onRequest} from "firebase-functions/https";
+import {createHash} from "node:crypto";
+import {initializeApp} from "firebase-admin/app";
+import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {setGlobalOptions} from "firebase-functions/v2";
+import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {onSchedule} from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
+initializeApp();
 
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
-setGlobalOptions({ maxInstances: 10 });
+const db = getFirestore();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const WARSAW_TIME_ZONE = "Europe/Warsaw";
 
-export const helloWorld = onRequest((request, response) => {
-  logger.info("Hello logs!", {structuredData: true});
-  response.send("Hello from Firebase!");
+setGlobalOptions({
+  maxInstances: 10,
+  region: "europe-west1",
 });
+
+function normalizeEmail(email: unknown): string {
+  if (typeof email !== "string") {
+    throw new HttpsError("invalid-argument", "Email is required.");
+  }
+
+  const normalized = email.trim().toLowerCase();
+  if (!EMAIL_REGEX.test(normalized)) {
+    throw new HttpsError("invalid-argument", "Enter a valid email address.");
+  }
+
+  return normalized;
+}
+
+function emailDocumentId(email: string): string {
+  return createHash("sha256").update(email).digest("hex");
+}
+
+function getWarsawDateKey(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: WARSAW_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+async function sendMisconceptionEmail(
+  email: string,
+  misconception: FirebaseFirestore.DocumentData,
+): Promise<void> {
+  void email;
+  void misconception;
+  // TODO: Call the Forward Email API directly with the recipient and content.
+}
+
+export const subscribeToNewsletter = onCall(async (request) => {
+  const email = normalizeEmail(request.data?.email);
+  const subscriberRef = db.collection("newsletterSubscribers").doc(emailDocumentId(email));
+  const now = FieldValue.serverTimestamp();
+
+  const status = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(subscriberRef);
+
+    if (snapshot.exists && snapshot.get("status") === "active") {
+      transaction.update(subscriberRef, {
+        updatedAt: now,
+      });
+      return "already-subscribed";
+    }
+
+    transaction.set(
+      subscriberRef,
+      {
+        email,
+        status: "active",
+        source: "frontend",
+        createdAt: snapshot.exists ? snapshot.get("createdAt") ?? now : now,
+        updatedAt: now,
+      },
+      {merge: true},
+    );
+
+    return "subscribed";
+  });
+
+  return {status};
+});
+
+export const sendDailyMisconception = onSchedule(
+  {
+    schedule: "every day 08:00",
+    timeZone: WARSAW_TIME_ZONE,
+  },
+  async () => {
+    const dateKey = getWarsawDateKey();
+    const sendRef = db.collection("newsletterSends").doc(dateKey);
+
+    const shouldSend = await db.runTransaction(async (transaction) => {
+      const sendSnapshot = await transaction.get(sendRef);
+      const existingStatus = sendSnapshot.exists ? sendSnapshot.get("status") : undefined;
+
+      if (
+        existingStatus === "sending" ||
+        existingStatus === "prepared" ||
+        existingStatus === "sent"
+      ) {
+        return false;
+      }
+
+      transaction.set(
+        sendRef,
+        {
+          date: dateKey,
+          status: "sending",
+          startedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+
+      return true;
+    });
+
+    if (!shouldSend) {
+      logger.info("Daily misconception newsletter already handled.", {dateKey});
+      return;
+    }
+
+    try {
+      const dailySnapshot = await db.collection("dailyMisconceptions").doc(dateKey).get();
+      if (!dailySnapshot.exists) {
+        throw new Error(`No daily misconception scheduled for ${dateKey}.`);
+      }
+
+      const daily = dailySnapshot.data() ?? {};
+      const misconceptionId = daily.misconceptionId;
+      if (typeof misconceptionId !== "string" || misconceptionId.length === 0) {
+        throw new Error(`Daily schedule ${dateKey} is missing misconceptionId.`);
+      }
+
+      const misconceptionSnapshot = await db
+        .collection("misconceptions")
+        .doc(misconceptionId)
+        .get();
+      if (!misconceptionSnapshot.exists || misconceptionSnapshot.get("active") !== true) {
+        throw new Error(`Misconception ${misconceptionId} is missing or inactive.`);
+      }
+
+      const subscribersSnapshot = await db
+        .collection("newsletterSubscribers")
+        .where("status", "==", "active")
+        .get();
+      const misconception = misconceptionSnapshot.data() ?? {};
+      let preparedCount = 0;
+      let failedCount = 0;
+      let skippedCount = 0;
+
+      for (const subscriber of subscribersSnapshot.docs) {
+        const email = subscriber.get("email");
+        if (typeof email !== "string" || !EMAIL_REGEX.test(email)) {
+          skippedCount++;
+          continue;
+        }
+
+        try {
+          await sendMisconceptionEmail(email, misconception);
+          preparedCount++;
+        } catch (error) {
+          failedCount++;
+          logger.error("Failed to send daily misconception email.", {
+            subscriberId: subscriber.id,
+            error,
+          });
+        }
+      }
+
+      await sendRef.set(
+        {
+          status: failedCount > 0 ? "partial" : "prepared",
+          misconceptionId,
+          recipientCount: subscribersSnapshot.size,
+          preparedCount,
+          sentCount: 0,
+          failedCount,
+          skippedCount,
+          completedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+    } catch (error) {
+      await sendRef.set(
+        {
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+      throw error;
+    }
+  },
+);

@@ -2,6 +2,8 @@ import { Command } from "commander";
 import { writeFile, readFile, mkdir, access } from "fs/promises";
 import { join } from "path";
 import { fal } from "@fal-ai/client";
+import { getApps, initializeApp } from "firebase-admin/app";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { getDateRangeIndices } from "../shared/daily-selection";
 
 const program = new Command();
@@ -72,6 +74,40 @@ interface MisconceptionsOutput {
   misconceptions: Misconception[];
 }
 
+interface FirestoreOptions {
+  projectId?: string;
+}
+
+function getAdminDb(options: FirestoreOptions) {
+  if (getApps().length === 0) {
+    initializeApp(options.projectId ? { projectId: options.projectId } : undefined);
+  }
+
+  return getFirestore();
+}
+
+function toDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKey(dateKey: string): Date {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) {
+    throw new Error(`Invalid date "${dateKey}". Use yyyy-mm-dd.`);
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 /**
  * Fetch and parse a Wikipedia page using the MediaWiki API
  */
@@ -119,7 +155,7 @@ function extractLatex(html: string): string {
  */
 function cleanHtmlText(html: string): string {
   // First, extract LaTeX from math elements
-  let text = extractLatex(html);
+  const text = extractLatex(html);
 
   return text
     // Remove reference tags like [1], [2], etc.
@@ -525,6 +561,217 @@ program
       }
 
       console.log(`\n✅ Done! Generated ${successCount} images, ${errorCount} errors.`);
+    }
+  );
+
+program
+  .command("seed-firestore")
+  .description("Import misconceptions.json into Firestore")
+  .option("-i, --input <path>", "Input JSON file path", "misconceptions.json")
+  .option("-p, --project-id <id>", "Firebase project ID")
+  .option("--dry-run", "Show what would be written without writing")
+  .action(
+    async (options: {
+      input: string;
+      projectId?: string;
+      dryRun?: boolean;
+    }) => {
+      const inputPath = options.input.startsWith("/")
+        ? options.input
+        : join(process.cwd(), options.input);
+      const content = await readFile(inputPath, "utf-8");
+      const data = JSON.parse(content) as MisconceptionsOutput;
+
+      if (options.dryRun) {
+        console.log(`Would import ${data.misconceptions.length} misconceptions from ${inputPath}`);
+        console.log("First entries:");
+        for (const misconception of data.misconceptions.slice(0, 5)) {
+          console.log(`- ${misconception.id}: ${misconception.text.slice(0, 80)}...`);
+        }
+        return;
+      }
+
+      const db = getAdminDb(options);
+      let batch = db.batch();
+      let operationCount = 0;
+      let totalWrites = 0;
+
+      const commitIfNeeded = async (force = false) => {
+        if (operationCount === 0 || (!force && operationCount < 450)) {
+          return;
+        }
+
+        await batch.commit();
+        totalWrites += operationCount;
+        batch = db.batch();
+        operationCount = 0;
+      };
+
+      data.misconceptions.forEach((misconception, index) => {
+        const ref = db.collection("misconceptions").doc(misconception.id);
+        batch.set(
+          ref,
+          {
+            ...misconception,
+            order: index,
+            active: true,
+            reviewed: false,
+            importedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        operationCount++;
+      });
+
+      batch.set(
+        db.collection("metadata").doc("misconceptions"),
+        {
+          generatedAt: data.generatedAt,
+          totalCount: data.totalCount,
+          importedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      operationCount++;
+
+      await commitIfNeeded(true);
+      console.log(`Imported ${totalWrites} Firestore documents from ${inputPath}`);
+    }
+  );
+
+program
+  .command("schedule-firestore")
+  .description("Create dailyMisconceptions schedule docs from ordered active misconceptions")
+  .option("-p, --project-id <id>", "Firebase project ID")
+  .option("-s, --start <date>", "Start date as yyyy-mm-dd", toDateKey(new Date()))
+  .option("-d, --days <n>", "Number of days to schedule", (value) => parseInt(value, 10), 30)
+  .option("-o, --offset <n>", "Offset into ordered misconceptions", (value) => parseInt(value, 10), 0)
+  .option("--status <status>", "Status to write on schedule docs", "published")
+  .option("--overwrite", "Overwrite existing daily schedule docs")
+  .option("--dry-run", "Show what would be written without writing")
+  .action(
+    async (options: {
+      projectId?: string;
+      start: string;
+      days: number;
+      offset: number;
+      status: string;
+      overwrite?: boolean;
+      dryRun?: boolean;
+    }) => {
+      const db = getAdminDb(options);
+      const misconceptionsSnapshot = await db
+        .collection("misconceptions")
+        .where("active", "==", true)
+        .orderBy("order", "asc")
+        .get();
+      const misconceptions = misconceptionsSnapshot.docs.map((docSnapshot) => ({
+        id: docSnapshot.id,
+        order: Number(docSnapshot.get("order") ?? 0),
+        text: String(docSnapshot.get("text") ?? ""),
+      }));
+
+      if (misconceptions.length === 0) {
+        throw new Error("No active misconceptions found in Firestore.");
+      }
+
+      const startDate = parseDateKey(options.start);
+      const writes: Array<{
+        date: string;
+        misconceptionId: string;
+        order: number;
+        text: string;
+      }> = [];
+
+      for (let day = 0; day < options.days; day++) {
+        const date = toDateKey(addCalendarDays(startDate, day));
+        const misconception = misconceptions[(options.offset + day) % misconceptions.length];
+        writes.push({
+          date,
+          misconceptionId: misconception.id,
+          order: misconception.order,
+          text: misconception.text,
+        });
+      }
+
+      if (options.dryRun) {
+        for (const write of writes) {
+          console.log(`${write.date}: ${write.misconceptionId} - ${write.text.slice(0, 80)}...`);
+        }
+        return;
+      }
+
+      const batch = db.batch();
+      let writeCount = 0;
+      let skipCount = 0;
+
+      for (const write of writes) {
+        const ref = db.collection("dailyMisconceptions").doc(write.date);
+        if (!options.overwrite && (await ref.get()).exists) {
+          skipCount++;
+          continue;
+        }
+
+        batch.set(
+          ref,
+          {
+            date: write.date,
+            misconceptionId: write.misconceptionId,
+            order: write.order,
+            status: options.status,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        writeCount++;
+      }
+
+      if (writeCount > 0) {
+        await batch.commit();
+      }
+
+      console.log(`Scheduled ${writeCount} days, skipped ${skipCount} existing docs.`);
+    }
+  );
+
+program
+  .command("preview-schedule")
+  .description("Preview scheduled misconceptions from Firestore")
+  .option("-p, --project-id <id>", "Firebase project ID")
+  .option("-s, --start <date>", "Start date as yyyy-mm-dd", toDateKey(new Date()))
+  .option("-d, --days <n>", "Number of days to preview", (value) => parseInt(value, 10), 7)
+  .action(
+    async (options: {
+      projectId?: string;
+      start: string;
+      days: number;
+    }) => {
+      const db = getAdminDb(options);
+      const startDate = parseDateKey(options.start);
+
+      for (let day = 0; day < options.days; day++) {
+        const date = toDateKey(addCalendarDays(startDate, day));
+        const dailySnapshot = await db.collection("dailyMisconceptions").doc(date).get();
+
+        if (!dailySnapshot.exists) {
+          console.log(`${date}: not scheduled`);
+          continue;
+        }
+
+        const misconceptionId = String(dailySnapshot.get("misconceptionId") ?? "");
+        const misconceptionSnapshot = await db
+          .collection("misconceptions")
+          .doc(misconceptionId)
+          .get();
+        const text = misconceptionSnapshot.exists
+          ? String(misconceptionSnapshot.get("text") ?? "")
+          : "missing misconception";
+        console.log(
+          `${date}: ${dailySnapshot.get("status")} ${misconceptionId} - ${text.slice(0, 80)}...`
+        );
+      }
     }
   );
 

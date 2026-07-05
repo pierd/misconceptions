@@ -1,0 +1,22 @@
+firebase.json
+  h_373d6cc5be4f86 1-41
+.gitignore
+  h_373d6cc5be4f86 6
+.nvmrc
+  h_373d6cc5be4f86 1
+functions/src/index.ts
+  h_373d6cc5be4f86 1-32
+functions/.eslintrc.js
+  h_373d6cc5be4f86 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2283747c200e0b7f46fe1214f7b57582a3055fd4",
+  "prompts": {},
+  "humans": {
+    "h_373d6cc5be4f86": {
+      "author": "Kuba Jaroszewski <jakub.jaroszewski@gmail.com>"
+    }
+  }
+}

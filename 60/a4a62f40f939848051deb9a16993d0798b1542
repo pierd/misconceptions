@@ -1,0 +1,19 @@
+functions/src/index.ts
+  s_a77a17fbbe6908::t_c2c45a1ca0e0fe 19-21,151-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "60a4a62f40f939848051deb9a16993d0798b1542",
+  "prompts": {},
+  "sessions": {
+    "s_a77a17fbbe6908": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "12ebb628-3497-4531-bcd9-ccf1fc2cc544",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Kuba Jaroszewski <jakub.jaroszewski@gmail.com>"
+    }
+  }
+}
